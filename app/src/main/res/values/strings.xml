@@ -150,6 +150,8 @@
     <string name="settings_bubble_lock_title">Зафиксировать позицию</string>
     <string name="settings_bubble_lock_body">Птичка не двигается при случайных касаниях.</string>
     <string name="settings_voice_suffix_title">Добавлять пометку</string>
+    <string name="settings_filler_filter_title">Убирать слова-паразиты</string>
+    <string name="settings_filler_filter_body">Вырезает «э-э», «хмм», «ну», «типа», «как бы» и подобное из распознанного текста.</string>
     <string name="settings_voice_suffix_body">Дописывает «[текст распознан с голоса]» на новой строке после каждой диктовки.</string>
     <!-- Show-service row labels: title shows current state, body explains
          what tapping does. Toggle row tap leads to a confirmation dialog

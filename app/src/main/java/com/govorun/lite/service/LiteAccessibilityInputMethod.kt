@@ -74,6 +74,14 @@ class LiteAccessibilityInputMethod(
     var lastEditorInfo: EditorInfo? = null
         private set
 
+    /**
+     * Fired after every onStartInput / onFinishInput. The service uses it to
+     * re-evaluate bubble visibility: the password / search filters read the
+     * EditorInfo, which can arrive *after* the accessibility window event
+     * that triggered the last visibility decision.
+     */
+    var onInputChanged: (() -> Unit)? = null
+
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         lastEditorInfo = attribute
         try {
@@ -85,6 +93,7 @@ class LiteAccessibilityInputMethod(
             Log.w(TAG, "onStartInput suppressed framework NPE: ${npe.message}")
         }
         startCount.value = startCount.value + 1
+        onInputChanged?.invoke()
     }
 
     override fun onFinishInput() {
@@ -94,6 +103,7 @@ class LiteAccessibilityInputMethod(
             Log.w(TAG, "onFinishInput suppressed framework NPE: ${npe.message}")
         }
         finishCount.value = finishCount.value + 1
+        onInputChanged?.invoke()
     }
 
     /**

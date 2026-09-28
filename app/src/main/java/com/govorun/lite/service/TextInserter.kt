@@ -6,7 +6,9 @@ import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import com.govorun.lite.stats.StatsStore
 import com.govorun.lite.transcriber.Dictionary
+import com.govorun.lite.transcriber.FillerFilter
 import com.govorun.lite.util.AppLog
+import com.govorun.lite.util.Prefs
 
 /**
  * Inserts recognised text into whatever editable is currently focused.
@@ -50,9 +52,16 @@ class TextInserter(
 
     fun insert(rawText: String) {
         if (rawText.isBlank()) return
-        val replaced = Dictionary.applyReplacements(service, rawText)
+        // Fillers go first so the user's dictionary sees clean text and can
+        // still delete anything the built-in list keeps (e.g. «блин»).
+        val cleaned = if (Prefs.isFillerFilterEnabled(service)) FillerFilter.apply(rawText) else rawText
+        if (cleaned.isBlank()) {
+            AppLog.log(service, "Filler filter: segment was fillers only (raw=${rawText.length})")
+            return
+        }
+        val replaced = Dictionary.applyReplacements(service, cleaned)
         if (replaced != rawText) {
-            AppLog.log(service, "Dictionary applied (raw=${rawText.length} → result=${replaced.length})")
+            AppLog.log(service, "Filters applied (raw=${rawText.length} → result=${replaced.length})")
         }
 
         val connection = imeProvider()?.currentInputConnection

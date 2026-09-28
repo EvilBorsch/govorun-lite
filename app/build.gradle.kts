@@ -22,8 +22,8 @@ android {
         applicationId = "com.govorun.lite"
         minSdk = 33
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.0.15"
+        versionCode = 20
+        versionName = "1.0.15-fillers"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -90,4 +90,6 @@ dependencies {
     // sherpa-onnx v1.12.34: offline ASR engine used with GigaAM v3.
     // AAR must be present at app/libs/sherpa-onnx.aar — see scripts/download-sherpa-onnx.sh.
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
+
+    testImplementation("junit:junit:4.13.2")
 }

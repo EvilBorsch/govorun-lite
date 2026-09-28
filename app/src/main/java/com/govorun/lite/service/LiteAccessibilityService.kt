@@ -48,6 +48,7 @@ class LiteAccessibilityService : AccessibilityService() {
         var instance: LiteAccessibilityService? = null
             private set
         private const val TAG = "LiteAccessibility"
+        private val RECHECK_DELAYS_MS = longArrayOf(300L, 1_000L)
 
         /**
          * Used by [com.govorun.lite.util.Haptics] to dispatch haptic
@@ -97,8 +98,24 @@ class LiteAccessibilityService : AccessibilityService() {
      *  enough to absorb most transitions, short enough to feel
      *  responsive on a deliberate field tap. */
     private val showDebounceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var showPending = false
     private val pendingShowRunnable = Runnable {
+        showPending = false
         bubbleOverlay?.setVisibility(android.view.View.VISIBLE)
+    }
+
+    /** Follow-up visibility checks after each trigger. The window list we
+     *  read in updateImeVisibility can lag the screen by a few hundred ms
+     *  (keyboard slide-in animation, window reshuffles), and if the event
+     *  that would have corrected it never comes, the bubble stays hidden
+     *  while the keyboard is up. Re-checking shortly after closes that gap
+     *  without any continuous polling. */
+    private val recheckHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val recheckRunnable = Runnable { updateImeVisibility() }
+
+    private fun scheduleVisibilityRechecks() {
+        recheckHandler.removeCallbacksAndMessages(null)
+        for (delayMs in RECHECK_DELAYS_MS) recheckHandler.postDelayed(recheckRunnable, delayMs)
     }
 
     // Accumulates sub-second speech durations from VAD callbacks. We only
@@ -157,7 +174,17 @@ class LiteAccessibilityService : AccessibilityService() {
         // Override the default to instantiate our subclass: it tracks
         // onStartInput / onFinishInput callback counts so pasteText can
         // detect zombie InputConnection state before committing.
-        return LiteAccessibilityInputMethod(this).also { accessibilityInputMethod = it }
+        return LiteAccessibilityInputMethod(this).also { ime ->
+            accessibilityInputMethod = ime
+            // Password/search filters read EditorInfo, which may land after
+            // the window event we last decided on — re-evaluate once it does.
+            ime.onInputChanged = {
+                recheckHandler.post {
+                    updateImeVisibility()
+                    scheduleVisibilityRechecks()
+                }
+            }
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -228,7 +255,9 @@ class LiteAccessibilityService : AccessibilityService() {
             // Without it, the IME-window event won't refire (the same IME stays
             // visible) and we won't know to hide the bubble for the new field.
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> updateImeVisibility()
+            else -> return
         }
+        scheduleVisibilityRechecks()
     }
 
     private fun isImePackage(pkg: String): Boolean {
@@ -281,7 +310,6 @@ class LiteAccessibilityService : AccessibilityService() {
         // the Quick Settings tile. Recording still stops on real focus loss
         // so the mic isn't held forever, but the bubble itself sticks.
         val visibilityChanged = shouldShow != isImeVisible
-        if (!visibilityChanged && !manualAlwaysShow) return
         if (visibilityChanged && !shouldShow) stopVadRecording(silent = true)
         isImeVisible = shouldShow
 
@@ -295,8 +323,18 @@ class LiteAccessibilityService : AccessibilityService() {
             shouldShow -> View.VISIBLE
             else -> View.GONE
         }
+        // Always reconcile the view with the decision, even when the
+        // decision itself didn't change. Previously an unchanged decision
+        // returned early, so any drift between the view and isImeVisible
+        // (a stale window list, a rebuild, a failed addView) stuck until
+        // the next real keyboard open/close.
+        if (effectiveVisibility == View.VISIBLE) {
+            bubbleOverlay?.ensureAttached(initiallyVisible = false)
+        }
+        val viewDrifted = (effectiveVisibility == View.VISIBLE) != (isBubbleVisible() || showPending)
         applyVisibilityWithDebounce(effectiveVisibility)
-        AppLog.log(this, "Service: bubbleShow=$shouldShow ime=$imeVisible locked=$locked password=$passwordField search=$searchField appFiltered=$appFiltered alwaysShow=$manualAlwaysShow silence=$manualSilence foreground=$currentForegroundPackage")
+        if (!visibilityChanged && !viewDrifted) return
+        AppLog.log(this, "Service: bubbleShow=$shouldShow drifted=$viewDrifted ime=$imeVisible locked=$locked password=$passwordField search=$searchField appFiltered=$appFiltered alwaysShow=$manualAlwaysShow silence=$manualSilence foreground=$currentForegroundPackage")
     }
 
     /**
@@ -308,10 +346,16 @@ class LiteAccessibilityService : AccessibilityService() {
      * bubble flicker.
      */
     private fun applyVisibilityWithDebounce(visibility: Int) {
-        showDebounceHandler.removeCallbacks(pendingShowRunnable)
         if (visibility == View.VISIBLE) {
+            // Idempotent: called on every event now, so don't restart a
+            // pending show (a steady stream of events would postpone it
+            // forever) and don't re-show an already visible bubble.
+            if (showPending || isBubbleVisible()) return
+            showPending = true
             showDebounceHandler.postDelayed(pendingShowRunnable, 120L)
         } else {
+            showDebounceHandler.removeCallbacks(pendingShowRunnable)
+            showPending = false
             bubbleOverlay?.setVisibility(visibility)
         }
     }
@@ -492,7 +536,9 @@ class LiteAccessibilityService : AccessibilityService() {
         // Wallpaper colour changes arrive here on API 31+. Rebuild the bubble
         // with a fresh DC-wrapped context so the new accent takes effect
         // without the user having to toggle the service.
-        bubbleOverlay?.rebuild(initiallyVisible = isImeVisible)
+        bubbleOverlay?.rebuild(initiallyVisible = isBubbleVisible())
+        updateImeVisibility()
+        scheduleVisibilityRechecks()
     }
 
     /**
@@ -509,7 +555,8 @@ class LiteAccessibilityService : AccessibilityService() {
      * wallpaper-colour reaction) instead of trying to re-layout in place.
      */
     fun applyBubbleSizeFromPrefs() {
-        bubbleOverlay?.applySize(initiallyVisible = isImeVisible)
+        bubbleOverlay?.applySize(initiallyVisible = isBubbleVisible())
+        updateImeVisibility()
     }
 
     /**
@@ -561,6 +608,8 @@ class LiteAccessibilityService : AccessibilityService() {
      * event.
      */
     private fun applyVisibilityNow() {
+        showDebounceHandler.removeCallbacks(pendingShowRunnable)
+        showPending = false
         val locked = keyguardManager?.isKeyguardLocked == true
         val passwordField = InputFieldFilter.isPasswordField(accessibilityInputMethod)
         val effective = when {
@@ -592,6 +641,9 @@ class LiteAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        recheckHandler.removeCallbacksAndMessages(null)
+        showDebounceHandler.removeCallbacksAndMessages(null)
+        accessibilityInputMethod?.onInputChanged = null
         stopVadRecording(silent = true)
         scope.cancel()
         try { unregisterReceiver(screenOffReceiver) } catch (_: Exception) {}

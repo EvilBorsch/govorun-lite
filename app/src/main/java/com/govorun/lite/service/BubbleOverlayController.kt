@@ -63,12 +63,18 @@ class BubbleOverlayController(
         // swipes (which haven't crossed the 10dp drag threshold yet by the
         // time HOLD_DELAY_MS elapses) trigger a brief recording flash.
         private const val HOLD_MOVEMENT_SLOP_DP = 5f
+        // Height assumed for clamping before the bubble has been laid out.
+        private const val FALLBACK_BUBBLE_HEIGHT_DP = 96f
     }
 
     private val windowManager =
         service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var bubbleView: BubbleView? = null
     private var bubbleParams: WindowManager.LayoutParams? = null
+    // True once WindowManager.addView succeeded for the current view. A
+    // failed add used to leave an orphan view that silently swallowed every
+    // later visibility change — the bubble was gone until service restart.
+    private var attached = false
 
     /** Build the LayoutParams (once) and attach the bubble. */
     fun create(initiallyVisible: Boolean) {
@@ -110,6 +116,12 @@ class BubbleOverlayController(
             try { windowManager.removeView(v) } catch (_: Exception) {}
         }
         bubbleView = null
+        attached = false
+    }
+
+    /** Re-add the bubble if a previous addView failed. Cheap no-op otherwise. */
+    fun ensureAttached(initiallyVisible: Boolean) {
+        if (!attached) attachFreshBubble(initiallyVisible)
     }
 
     /** Rebuild the bubble view (preserves params + position). Used on
@@ -175,9 +187,15 @@ class BubbleOverlayController(
         try { windowManager.updateViewLayout(bubbleView, params) } catch (_: Exception) {}
     }
 
-    /** Push the visibility decision into the view on its own looper. */
+    /** Push the visibility decision into the view. Applied synchronously on
+     *  the main thread so [isVisible] reflects it immediately — the service
+     *  reconciles against it on every event; posted from anywhere else. */
     fun setVisibility(visibility: Int) {
-        bubbleView?.post { bubbleView?.visibility = visibility }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            bubbleView?.visibility = visibility
+        } else {
+            bubbleView?.post { bubbleView?.visibility = visibility }
+        }
     }
 
     fun isVisible(): Boolean = bubbleView?.visibility == View.VISIBLE
@@ -209,6 +227,20 @@ class BubbleOverlayController(
         try { windowManager.updateViewLayout(bubbleView, params) } catch (_: Exception) {}
     }
 
+    /**
+     * Keep the bubble inside the screen vertically. y is an offset from the
+     * vertical centre and FLAG_LAYOUT_NO_LIMITS lets the window leave the
+     * display, so a position saved in portrait (or dragged too far) could
+     * put the bubble entirely off-screen in landscape / on a smaller window.
+     */
+    private fun clampY(y: Int): Int {
+        val screenHeight = windowManager.currentWindowMetrics.bounds.height()
+        val bubbleHeight = bubbleView?.height?.takeIf { it > 0 }
+            ?: (FALLBACK_BUBBLE_HEIGHT_DP * service.resources.displayMetrics.density).toInt()
+        val limit = (screenHeight - bubbleHeight) / 2
+        return if (limit <= 0) 0 else y.coerceIn(-limit, limit)
+    }
+
     private fun edgeMarginPx(): Int =
         (Prefs.getBubbleEdgeMargin(service) * service.resources.displayMetrics.density).toInt()
 
@@ -228,9 +260,11 @@ class BubbleOverlayController(
     @SuppressLint("ClickableViewAccessibility")
     private fun attachFreshBubble(initiallyVisible: Boolean) {
         val params = bubbleParams ?: return
+        params.y = clampY(params.y)
         bubbleView?.let {
             try { windowManager.removeView(it) } catch (_: Exception) {}
         }
+        attached = false
         val fresh = BubbleView(bubbleContext()).apply {
             setIdleAlpha(Prefs.getBubbleAlpha(service))
             visibility = if (initiallyVisible) View.VISIBLE else View.GONE
@@ -246,7 +280,10 @@ class BubbleOverlayController(
             // extra layer was redundant work.
         }
         installTouchListener(fresh, params)
-        try { windowManager.addView(fresh, params) } catch (e: Exception) {
+        try {
+            windowManager.addView(fresh, params)
+            attached = true
+        } catch (e: Exception) {
             Log.e(TAG, "Failed to add bubble view", e)
         }
         bubbleView = fresh
@@ -328,7 +365,7 @@ class BubbleOverlayController(
                             // fire) but skip the layout update.
                             if (Math.abs(dy) > dragThresholdPx &&
                                 !Prefs.isBubblePositionLocked(service)) {
-                                params.y = initialY + dy.toInt()
+                                params.y = clampY(initialY + dy.toInt())
                                 try {
                                     windowManager.updateViewLayout(bubbleView, params)
                                 } catch (_: Exception) {}

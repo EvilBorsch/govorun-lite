@@ -158,6 +158,15 @@ class SettingsActivity : AppCompatActivity() {
         }
         voiceSuffixRow.setOnClickListener { voiceSuffixSwitch.toggle() }
 
+        val fillerFilterSwitch = findViewById<MaterialSwitch>(R.id.fillerFilterSwitch)
+        val fillerFilterRow = findViewById<View>(R.id.fillerFilterRow)
+
+        fillerFilterSwitch.isChecked = Prefs.isFillerFilterEnabled(this)
+        fillerFilterSwitch.setOnCheckedChangeListener { _, checked ->
+            Prefs.setFillerFilterEnabled(this, checked)
+        }
+        fillerFilterRow.setOnClickListener { fillerFilterSwitch.toggle() }
+
         val keepScreenSwitch = findViewById<MaterialSwitch>(R.id.keepScreenSwitch)
         val keepScreenRow = findViewById<View>(R.id.keepScreenRow)
         val keepScreenBody = findViewById<MaterialTextView>(R.id.keepScreenBody)

@@ -386,6 +386,21 @@ object Prefs {
             .apply()
     }
 
+    // Strip hesitations and filler words («э-э», «ну», «типа», «как бы»)
+    // from recognised text — see FillerFilter. On by default.
+    private const val KEY_FILLER_FILTER_ENABLED = "filler_filter_enabled"
+
+    fun isFillerFilterEnabled(context: Context): Boolean =
+        context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FILLER_FILTER_ENABLED, true)
+
+    fun setFillerFilterEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_FILLER_FILTER_ENABLED, enabled)
+            .apply()
+    }
+
     // App filter — controls in which apps the bubble appears.
     // Mode "blacklist" (default): show everywhere except listed packages.
     // Mode "whitelist": show only in listed packages (empty list → show everywhere).

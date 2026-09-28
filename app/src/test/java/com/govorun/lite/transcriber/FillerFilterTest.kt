@@ -15,6 +15,12 @@ class FillerFilterTest {
             "Вот конец предложения. Это пример такого текста, где много слов-паразитов."
     )
 
+    // Real GigaAM output captured on the phone.
+    @Test fun realPhoneSample() = check(
+        "Спички. Так. Вот я зажал. А, надо из кармана свечку. А-а-а! Понятно. Вот, и я беру, типа, подношу.",
+        "Спички. Так. Вот я зажал. А, надо из кармана свечку. Понятно. И я беру подношу."
+    )
+
     // --- hesitations ---
     @Test fun hesitationBetweenCommas() = check("Привет, э-э, как дела?", "Привет, как дела?")
     @Test fun hesitationBeforeQuestion() = check("Как дела, э-э?", "Как дела?")

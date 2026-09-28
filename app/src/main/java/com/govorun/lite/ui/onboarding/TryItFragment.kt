@@ -28,9 +28,11 @@ import com.govorun.lite.R
 import com.govorun.lite.model.GigaAmModel
 import com.govorun.lite.overlay.BubbleView
 import com.govorun.lite.stats.StatsStore
+import com.govorun.lite.transcriber.FillerFilter
 import com.govorun.lite.transcriber.OfflineTranscriber
 import com.govorun.lite.transcriber.VadRecorder
 import com.govorun.lite.util.Haptics
+import com.govorun.lite.util.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -336,7 +338,11 @@ class TryItFragment : OnboardingStepFragment() {
 
     private suspend fun appendSegment(text: String) {
         if (text.isBlank()) return
-        val trimmed = text.trim()
+        // Same filler cleanup as real dictation (TextInserter), so the demo
+        // shows what the user will actually get in other apps.
+        val cleaned = if (Prefs.isFillerFilterEnabled(requireContext())) FillerFilter.apply(text) else text
+        if (cleaned.isBlank()) return
+        val trimmed = cleaned.trim()
         withContext(Dispatchers.Main) {
             val isFirstSegment = accumulated.isEmpty()
             if (!isFirstSegment) accumulated.append(' ')
